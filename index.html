@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>早く涼しくなってほしい</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+</head>
+<body>
+  <div id="container">
+    <h1>早く涼しくなってほしい🌞</h1>
+    
+    <div id="map-chart-container">
+      <div id="map"></div>
+      <div id="chart-container">
+        <canvas id="stage"></canvas>
+        <div id="controls">
+          <label><input type="radio" name="period" value="7" checked> 1週間</label>
+          <label><input type="radio" name="period" value="14"> 2週間</label>
+          <label><input type="radio" name="period" value="30"> 1か月</label>
+        </div>
+        <div id="link">
+          <small><a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Weather data by Open-Meteo.com</a></small>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    $(document).ready(function() {
+      const map = L.map('map').setView([37.7749, 139.2394], 5);
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      }).addTo(map);
+      
+      let marker;
+      let chart;
+      let currentLat, currentLng;
+
+      map.on('click', async function(e) {
+        const { lat, lng } = e.latlng;
+        currentLat = lat;
+        currentLng = lng;
+        
+        try {
+          const period = $('input[name="period"]:checked').val();
+          const weatherData = await getWeatherData(lat, lng, period);
+          const locationData = await getLocationData(lat, lng);
+          
+          if (marker) {
+            map.removeLayer(marker);
+          }
+          
+          marker = L.marker([lat, lng]).addTo(map);
+          marker.bindPopup(`
+            緯度: ${lat.toFixed(4)}<br>
+            経度: ${lng.toFixed(4)}<br>
+            ${locationData}
+          `).openPopup();
+          
+          drawChart(weatherData);
+        } catch (error) {
+          console.error('データ取得エラー:', error);
+          if (marker) {
+            marker.bindPopup('データの取得に失敗しました。').openPopup();
+          }
+        }
+      });
+
+      $('input[name="period"]').on('change', async function() {
+        if (currentLat !== undefined && currentLng !== undefined) {
+          try {
+            const weatherData = await getWeatherData(currentLat, currentLng, $(this).val());
+            drawChart(weatherData);
+          } catch (error) {
+            console.error('データ取得エラー:', error);
+          }
+        }
+      });
+
+      async function getWeatherData(lat, lng, period) {
+        const startDate = getStartDate(period);
+        const endDate = getEndDate(period);
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&start_date=${startDate}&end_date=${endDate}`;
+        const response = await fetch(url);
+        return response.json();
+      }
+
+      async function getLocationData(lat, lng) {
+        const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1&accept-language=ja`;
+        const response = await fetch(url);
+        const data = await response.json();
+        const address = data.address;
+        
+        if (address) {
+          return `
+            都道府県: ${address.state || address.state_district || address.province || '不明'}<br>
+            市区町村: ${address.city || address.town || address.village || '不明'}
+          `;
+        }
+        return '位置情報が取得できませんでした。';
+      }
+
+      function getStartDate(days) {
+        const today = new Date();
+        const startDate = new Date();
+        startDate.setDate(today.getDate() - parseInt(days, 10));
+        return startDate.toISOString().split('T')[0];
+      }
+
+      function getEndDate(days) {
+        const today = new Date();
+        return today.toISOString().split('T')[0];
+      }
+
+      function drawChart(json) {
+        const mydata = {
+          labels: json.daily.time.map(date => new Date(date).toLocaleDateString('ja-JP', { month: '2-digit', day: '2-digit' })),
+          datasets: [{
+            label: '最高気温',
+            data: json.daily.temperature_2m_max,
+            borderColor: 'rgb(255, 99, 132)',
+            fill: false
+          }, {
+            label: '最低気温',
+            data: json.daily.temperature_2m_min,
+            borderColor: 'rgb(54, 162, 235)',
+            fill: false
+          }]
+        };
+
+        if (chart) {
+          chart.destroy();
+        }
+        
+        chart = new Chart($('#stage'), {
+          type: 'line',
+          data: mydata,
+          options: {
+            responsive: true,
+            plugins: {
+              legend: {
+                display: true,
+                labels: {
+                  color: 'rgb(75, 75, 75)',
+                  font: {
+                    family: 'Segoe UI'
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                ticks: {
+                  color: 'rgb(75, 75, 75)',
+                  font: {
+                    family: 'Segoe UI'
+                  }
+                },
+                grid: {
+                  color: 'rgba(75, 75, 75, 0.1)'
+                }
+              },
+              y: {
+                ticks: {
+                  color: 'rgb(75, 75, 75)',
+                  font: {
+                    family: 'Segoe UI'
+                  }
+                },
+                grid: {
+                  color: 'rgba(75, 75, 75, 0.1)'
+                }
+              }
+            }
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>
